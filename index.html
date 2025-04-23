@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام التعليم الذكي - MVP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-storage.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-messaging.js"></script>
+    <script src="https://meet.jit.si/external_api.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .rtl {
+            direction: rtl;
+        }
+        .ltr {
+            direction: ltr;
+        }
+        .sidebar-item.active {
+            background-color: #e5e7eb;
+            border-right: 4px solid #3b82f6;
+        }
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background-color: #ef4444;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+        .chat-bubble {
+            max-width: 70%;
+            border-radius: 1rem;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+        .chat-bubble.sent {
+            background-color: #3b82f6;
+            color: white;
+            margin-left: auto;
+            border-bottom-right-radius: 0;
+        }
+        .chat-bubble.received {
+            background-color: #e5e7eb;
+            color: #111827;
+            margin-right: auto;
+            border-bottom-left-radius: 0;
+        }
+        #videoContainer {
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+            height: 0;
+            overflow: hidden;
+        }
+        #videoContainer iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: 0;
+        }
+    </style>
+</head>
+<body class="rtl bg-gray-50">
+    <!-- Firebase Configuration -->
+    <script>
+        const firebaseConfig = {
+            apiKey: "YOUR_API_KEY",
+            authDomain: "YOUR_AUTH_DOMAIN",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_STORAGE_BUCKET",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+        
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        const storage = firebase.storage();
+        const messaging = firebase.messaging();
+        
+        // Request permission for notifications
+        function requestNotificationPermission() {
+            Notification.requestPermission().then((permission) => {
+                if (permission === 'granted') {
+                    console.log('Notification permission granted.');
+                    // Get FCM token
+                    messaging.getToken({ vapidKey: 'YOUR_VAPID_KEY' }).then((currentToken) => {
+                        if (currentToken) {
+                            console.log('FCM Token:', currentToken);
+                            // Send token to your server to associate with user
+                        } else {
+                            console.log('No registration token available.');
+                        }
+                    }).catch((err) => {
+                        console.log('An error occurred while retrieving token. ', err);
+                    });
+                } else {
+                    console.log('Unable to get permission to notify.');
+                }
+            });
+        }
+        
+        // Handle incoming messages
+        messaging.onMessage((payload) => {
+            console.log('Message received. ', payload);
+            const notificationTitle = payload.notification.title;
+            const notificationOptions = {
+                body: payload.notification.body,
+                icon: payload.notification.icon
+            };
+            
+            new Notification(notificationTitle, notificationOptions);
+        });
+    </script>
+
+    <!-- Auth Modal -->
+    <div id="authModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-semibold text-gray-900">تسجيل الدخول / إنشاء حساب</h3>
+                    <button id="closeAuthModal" class="text-gray-400 hover:text-gray-500">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <div id="authTabs" class="mb-4 border-b border-gray-200">
+                    <div class="flex flex-wrap -mb-px">
+                        <button id="loginTab" class="mr-2 py-2 px-4 font-medium text-sm border-b-2 border-blue-500 text-blue-600">تسجيل الدخول</button>
+                        <button id="registerTab" class="mr-2 py-2 px-4 font-medium text-sm border-b-2 border-transparent text-gray-500 hover:text-gray-600 hover:border-gray-300">إنشاء حساب</button>
+                    </div>
+                </div>
+                
+                <div id="loginForm">
+                    <div class="mb-4">
+                        <label for="loginEmail" class="block text-sm font-medium text-gray-700 mb-1">البريد الإلكتروني</label>
+                        <input type="email" id="loginEmail" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div class="mb-4">
+                        <label for="loginPassword" class="block text-sm font-medium text-gray-700 mb-1">كلمة المرور</label>
+                        <input type="password" id="loginPassword" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div class="mb-4 flex items-center">
+                        <input type="checkbox" id="rememberMe" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded ml-2">
+                        <label for="rememberMe" class="block text-sm text-gray-700">تذكرني</label>
+                    </div>
+                    <button id="loginBtn" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">تسجيل الدخول</button>
+                    <div class="mt-2 text-center">
+                        <button id="forgotPasswordBtn" class="text-sm text-blue-600 hover:text-blue-500">نسيت كلمة المرور؟</button>
+                    </div>
+                </div>
+                
+                <div id="registerForm" class="hidden">
+                    <div class="mb-4">
+                        <label for="registerName" class="block text-sm font-medium text-gray-700 mb-1">الاسم الكامل</label>
+                        <input type="text" id="registerName" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div class="mb-4">
+                        <label for="registerEmail" class="block text-sm font-medium text-gray-700 mb-1">البريد الإلكتروني</label>
+                        <input type="email" id="registerEmail" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div class="mb-4">
+                        <label for="registerPassword" class="block text-sm font-medium text-gray-700 mb-1">كلمة المرور</label>
+                        <input type="password" id="registerPassword" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div class="mb-4">
+                        <label for="registerConfirmPassword" class="block text-sm font-medium text-gray-700 mb-1">تأكيد كلمة المرور</label>
+                        <input type="password" id="registerConfirmPassword" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div class="mb-4">
+                        <label for="registerRole" class="block text-sm font-medium text-gray-700 mb-1">الدور</label>
+                        <select id="registerRole" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            <option value="student">طالب</option>
+                            <option value="teacher">معلم</option>
+                            <option value="admin">مشرف</option>
+                        </select>
+                    </div>
+                    <button id="registerBtn" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">إنشاء حساب</button>
+                </div>
+                
+                <div id="forgotPasswordForm" class="hidden">
+                    <div class="mb-4">
+                        <label for="forgotEmail" class="block text-sm font-medium text-gray-700 mb-1">البريد الإلكتروني</label>
+                        <input type="email" id="forgotEmail" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <button id="resetPasswordBtn" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">إرسال رابط إعادة تعيين</button>
+                    <div class="mt-2 text-center">
+                        <button id="backToLoginBtn" class="text-sm text-blue-600 hover:text-blue-500">العودة لتسجيل الدخول</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Layout -->
+    <div class="flex h-screen">
+        <!-- Sidebar -->
+        <div id="sidebar" class="hidden md:flex md:flex-shrink-0">
+            <div class="flex flex-col w-64 bg-white border-r border-gray-200">
+                <div class="flex items-center justify-center h-16 px-4 bg-blue-600">
+                    <div class="flex items-center">
+                        <i class="fas fa-graduation-cap text-white text-2xl mr-2"></i>
+                        <span class="text-white font-bold text-xl">نظام التعليم</span>
+                    </div>
+                </div>
+                <div class="flex flex-col flex-grow overflow-y-auto">
+                    <div class="px-4 py-4">
+                        <div class="flex items-center">
+                            <img class="h-10 w-10 rounded-full" src="https://via.placeholder.com/150" alt="User profile">
+                            <div class="mr-3">
+                                <p class="text-sm font-medium text-gray-900" id="sidebarUserName">محمد أحمد</p>
+                                <p class="text-xs text-gray-500" id="sidebarUserRole">معلم</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <nav class="flex-1 px-2 space-y-1">
+                        <a href="#" class="sidebar-item active flex items-center px-2 py-2 text-sm font-medium text-gray-900 rounded-md group">
+                            <i class="fas fa-home mr-3 text-gray-500 group-hover:text-gray-500"></i>
+                            لوحة التحكم
+                        </a>
+                        
+                        <a href="#" class="sidebar-item flex items-center px-2 py-2 text-sm font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                            <i class="fas fa-calendar-alt mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                            الجدول الدراسي
+                        </a>
+                        
+                        <a href="#" class="sidebar-item flex items-center px-2 py-2 text-sm font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                            <i class="fas fa-book mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                            الدروس والواجبات
+                        </a>
+                        
+                        <a href="#" class="sidebar-item flex items-center px-2 py-2 text-sm font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                            <i class="fas fa-users mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                            الفرق والمجموعات
+                        </a>
+                        
+                        <a href="#" class="sidebar-item flex items-center px-2 py-2 text-sm font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                            <i class="fas fa-comments mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                            المحادثات
+                            <span class="notification-badge">3</span>
+                        </a>
+                        
+                        <a href="#" class="sidebar-item flex items-center px-2 py-2 text-sm font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                            <i class="fas fa-video mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                            البث المباشر
+                        </a>
+                        
+                        <div class="pt-4">
+                            <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">الإدارة</p>
+                            
+                            <a href="#" class="sidebar-item flex items-center px-2 py-2 text-sm font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group mt-1">
+                                <i class="fas fa-cog mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                                الإعدادات
+                            </a>
+                            
+                            <a href="#" class="sidebar-item flex items-center px-2 py-2 text-sm font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                                <i class="fas fa-user-shield mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                                إدارة المستخدمين
+                            </a>
+                            
+                            <a href="#" class="sidebar-item flex items-center px-2 py-2 text-sm font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                                <i class="fas fa-chart-line mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                                التقارير والإحصائيات
+                            </a>
+                        </div>
+                    </nav>
+                </div>
+                
+                <div class="p-4 border-t border-gray-200">
+                    <button id="logoutBtn" class="w-full flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
+                        <i class="fas fa-sign-out-alt mr-2"></i>
+                        تسجيل الخروج
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Mobile sidebar -->
+        <div id="mobileSidebar" class="md:hidden fixed inset-0 z-40 hidden">
+            <div class="fixed inset-0 bg-gray-600 bg-opacity-75" id="mobileSidebarBackdrop"></div>
+            <div class="relative flex flex-col flex-1 w-64 bg-white">
+                <div class="absolute top-0 right-0 -mr-12 pt-2">
+                    <button id="closeMobileSidebar" class="ml-1 flex items-center justify-center h-10 w-10 rounded-full focus:outline-none focus:ring-2 focus:ring-inset focus:ring-white">
+                        <i class="fas fa-times text-white"></i>
+                    </button>
+                </div>
+                <div class="flex-1 h-0 pt-5 pb-4 overflow-y-auto">
+                    <div class="flex-shrink-0 flex items-center px-4">
+                        <i class="fas fa-graduation-cap text-blue-600 text-2xl mr-2"></i>
+                        <span class="text-blue-600 font-bold text-xl">نظام التعليم</span>
+                    </div>
+                    <nav class="mt-5 px-2 space-y-1">
+                        <a href="#" class="sidebar-item active flex items-center px-2 py-2 text-base font-medium text-gray-900 rounded-md group">
+                            <i class="fas fa-home mr-3 text-gray-500 group-hover:text-gray-500"></i>
+                            لوحة التحكم
+                        </a>
+                        
+                        <a href="#" class="sidebar-item flex items-center px-2 py-2 text-base font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                            <i class="fas fa-calendar-alt mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                            الجدول الدراسي
+                        </a>
+                        
+                        <a href="#" class="sidebar-item flex items-center px-2 py-2 text-base font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                            <i class="fas fa-book mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                            الدروس والواجبات
+                        </a>
+                        
+                        <a href="#" class="sidebar-item flex items-center px-2 py-2 text-base font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                            <i class="fas fa-users mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                            الفرق والمجموعات
+                        </a>
+                        
+                        <a href="#" class="sidebar-item flex items-center px-2 py-2 text-base font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                            <i class="fas fa-comments mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                            المحادثات
+                            <span class="notification-badge">3</span>
+                        </a>
+                        
+                        <a href="#" class="sidebar-item flex items-center px-2 py-2 text-base font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                            <i class="fas fa-video mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                            البث المباشر
+                        </a>
+                        
+                        <div class="pt-4">
+                            <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">الإدارة</p>
+                            
+                            <a href="#" class="sidebar-item flex items-center px-2 py-2 text-base font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group mt-1">
+                                <i class="fas fa-cog mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                                الإعدادات
+                            </a>
+                            
+                            <a href="#" class="sidebar-item flex items-center px-2 py-2 text-base font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                                <i class="fas fa-user-shield mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                                إدارة المستخدمين
+                            </a>
+                            
+                            <a href="#" class="sidebar-item flex items-center px-2 py-2 text-base font-medium text-gray-600 rounded-md hover:text-gray-900 hover:bg-gray-50 group">
+                                <i class="fas fa-chart-line mr-3 text-gray-400 group-hover:text-gray-500"></i>
+                                التقارير والإحصائيات
+                            </a>
+                        </div>
+                    </nav>
+                </div>
+                
+                <div class="flex-shrink-0 p-4 border-t border-gray-200">
+                    <button id="mobileLogoutBtn" class="w-full flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
+                        <i class="fas fa-sign-out-alt mr-2"></i>
+                        تسجيل الخروج
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="flex flex-col flex-1 overflow-hidden">
+            <!-- Top Navigation -->
+            <div class="bg-white shadow-sm">
+                <div class="px-4 sm:px-6 lg:px-8">
+                    <div class="flex justify-between h-16">
+                        <div class="flex items-center">
+                            <!-- Mobile menu button -->
+                            <button id="mobileSidebarButton" class="md:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500">
+                                <i class="fas fa-bars"></i>
+                            </button>
+                            
+                            <!-- Search bar -->
+                            <div class="ml-6 flex items-center">
+                                <div class="relative">
+                                    <div class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                                        <i class="fas fa-search text-gray-400"></i>
+                                    </div>
+                                    <input type="text" class="block w-full pr-10 pl-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="بحث...">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-center">
+                            <!-- Notifications -->
+                            <button class="p-1 rounded-full text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 relative">
+                                <i class="fas fa-bell"></i>
+                                <span class="notification-badge">5</span>
+                            </button>
+                            
+                            <!-- Messages -->
+                            <button class="mr-4 p-1 rounded-full text-gray-400 hover:text-gray-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 relative">
+                                <i class="fas fa-envelope"></i>
+                                <span class="notification-badge">3</span>
+                            </button>
+                            
+                            <!-- User dropdown -->
+                            <div class="relative ml-3">
+                                <div>
+                                    <button id="userMenuButton" class="flex text-sm rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                                        <img class="h-8 w-8 rounded-full" src="https://via.placeholder.com/150" alt="User profile">
+                                    </button>
+                                </div>
+                                
+                                <div id="userMenuDropdown" class="hidden origin-top-right absolute left-0 mt-2 w-48 rounded-md shadow-lg py-1 bg-white ring-1 ring-black ring-opacity-5 focus:outline-none z-50">
+                                    <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">ملفي الشخصي</a>
+                                    <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">الإعدادات</a>
+                                    <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">الإشعارات</a>
+                                    <div class="border-t border-gray-200"></div>
+                                    <button id="dropdownLogoutBtn" class="block w-full text-right px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">تسجيل الخروج</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Main Content Area -->
+            <div class="flex-1 overflow-auto">
+                <div class="py-6">
+                    <div class="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
+                        <h1 class="text-2xl font-semibold text-gray-900">لوحة التحكم</h1>
+                    </div>
+                    
+                    <div class="max-w-7xl mx-auto px-4 sm:px-6 md:px-8">
+                        <!-- Dashboard Content -->
+                        <div class="py-4">
+                            <!-- Stats Cards -->
+                            <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+                                <!-- Students Card -->
+                                <div class="bg-white overflow-hidden shadow rounded-lg">
+                                    <div class="p-5">
+                                        <div class="flex items-center">
+                                            <div class="flex-shrink-0 bg-blue-500 rounded-md p-3">
+                                                <i class="fas fa-users text-white"></i>
+                                            </div>
+                                            <div class="mr-3 flex-1">
+                                                <p class="text-sm font-medium text-gray-500 truncate">عدد الطلاب</p>
+                                                <p class="text-2xl font-semibold text-gray-900">245</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Teachers Card -->
+                                <div class="bg-white overflow-hidden shadow rounded-lg">
+                                    <div class="p-5">
+                                        <div class="flex items-center">
+                                            <div class="flex-shrink-0 bg-green-500 rounded-md p-3">
+                                                <i class="fas fa-chalkboard-teacher text-white"></i>
+                                            </div>
+                                            <div class="mr-3 flex-1">
+                                                <p class="text-sm font-medium text-gray-500 truncate">عدد المعلمين</p>
+                                                <p class="text-2xl font-semibold text-gray-900">32</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Courses Card -->
+                                <div class="bg-white overflow-hidden shadow rounded-lg">
+                                    <div class="p-5">
+                                        <div class="flex items-center">
+                                            <div class="flex-shrink-0 bg-yellow-500 rounded-md p-3">
+                                                <i class="fas fa-book text-white"></i>
+                                            </div>
+                                            <div class="mr-3 flex-1">
+                                                <p class="text-sm font-medium text-gray-500 truncate">عدد الدورات</p>
+                                                <p class="text-2xl font-semibold text-gray-900">18</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Assignments Card -->
+                                <div class="bg-white overflow-hidden shadow rounded-lg">
+                                    <div class="p-5">
+                                        <div class="flex items-center">
+                                            <div class="flex-shrink-0 bg-red-500 rounded-md p-3">
+                                                <i class="fas fa-tasks text-white"></i>
+                                            </div>
+                                            <div class="mr-3 flex-1">
+                                                <p class="text-sm font-medium text-gray-500 truncate">الواجبات المعلقة</p>
+                                                <p class="text-2xl font-semibold text-gray-900">7</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Main Dashboard Sections -->
+                            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                <!-- Left Column -->
+                                <div class="lg:col-span-2 space-y-6">
+                                    <!-- Create Educational Entity -->
+                                    <div class="bg-white shadow rounded-lg p-6">
+                                        <div class="flex items-center justify-between mb-4">
+                                            <h2 class="text-lg font-medium text-gray-900">إنشاء كيان تعليمي</h2>
+                                            <button class="text-blue-600 hover:text-blue-800">
+                                                <i class="fas fa-plus"></i>
+                                            </button>
+                                        </div>
+                                        
+                                        <div class="space-y-4">
+                                            <div>
+                                                <label for="entityName" class="block text-sm font-medium text-gray-700 mb-1">اسم الكيان</label>
+                                                <input type="text" id="entityName" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="أكاديمية العلوم">
+                                            </div>
+                                            
+                                            <div>
+                                                <label for="entityType" class="block text-sm font-medium text-gray-700 mb-1">نوع الكيان</label>
+                                                <select id="entityType" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                                    <option value="academy">أكاديمية</option>
+                                                    <option value="company">شركة</option>
+                                                    <option value="initiative">مبادرة</option>
+                                                </select>
+                                            </div>
+                                            
+                                            <div>
+                                                <label for="entityDescription" class="block text-sm font-medium text-gray-700 mb-1">وصف الكيان</label>
+                                                <textarea id="entityDescription" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="وصف مختصر للكيان التعليمي"></textarea>
+                                            </div>
+                                            
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 mb-1">صلاحيات الكيان</label>
+                                                <div class="space-y-2">
+                                                    <div class="flex items-center">
+                                                        <input id="permission-teams" type="checkbox" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded ml-2">
+                                                        <label for="permission-teams" class="block text-sm text-gray-700">إدارة الفرق</label>
+                                                    </div>
+                                                    <div class="flex items-center">
+                                                        <input id="permission-courses" type="checkbox" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded ml-2">
+                                                        <label for="permission-courses" class="block text-sm text-gray-700">إدارة الدورات</label>
+                                                    </div>
+                                                    <div class="flex items-center">
+                                                        <input id="permission-live" type="checkbox" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded ml-2">
+                                                        <label for="permission-live" class="block text-sm text-gray-700">البث المباشر</label>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="flex justify-end">
+                                                <button class="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ml-3">
+                                                    إلغاء
+                                                </button>
+                                                <button class="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                                                    حفظ
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Teams and Groups Management -->
+                                    <div class="bg-white shadow rounded-lg p-6">
+                                        <div class="flex items-center justify-between mb-4">
+                                            <h2 class="text-lg font-medium text-gray-900">إدارة الفرق والأقسام</h2>
+                                            <button class="text-blue-600 hover:text-blue-800">
+                                                <i class="fas fa-plus"></i>
+                                            </button>
+                                        </div>
+                                        
+                                        <div class="space-y-4">
+                                            <div class="overflow-x-auto">
+                                                <table class="min-w-full divide-y divide-gray-200">
+                                                    <thead class="bg-gray-50">
+                                                        <tr>
+                                                            <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">اسم الفريق</th>
+                                                            <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">النوع</th>
+                                                            <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">الأعضاء</th>
+                                                            <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">الحالة</th>
+                                                            <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">الإجراءات</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody class="bg-white divide-y divide-gray-200">
+                                                        <tr>
+                                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                                <div class="flex items-center">
+                                                                    <div class="flex-shrink-0 h-10 w-10">
+                                                                        <img class="h-10 w-10 rounded-full" src="https://via.placeholder.com/150" alt="">
+                                                                    </div>
+                                                                    <div class="mr-4">
+                                                                        <div class="text-sm font-medium text-gray-900">فريق الرياضيات</div>
+                                                                        <div class="text-sm text-gray-500">أكاديمية العلوم</div>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">فريق دراسي</td>
+                                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">24</td>
+                                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">نشط</span>
+                                                            </td>
+                                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                                                <a href="#" class="text-blue-600 hover:text-blue-900 ml-2">تعديل</a>
+                                                                <a href="#" class="text-red-600 hover:text-red-900">حذف</a>
+                                                            </td>
+                                                        </tr>
+                                                        
+                                                        <tr>
+                                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                                <div class="flex items-center">
+                                                                    <div class="flex-shrink-0 h-10 w-10">
+                                                                        <img class="h-10 w-10 rounded-full" src="https://via.placeholder.com/150" alt="">
+                                                                    </div>
+                                                                    <div class="mr-4">
+                                                                        <div class="text-sm font-medium text-gray-900">قسم اللغة العربية</div>
+                                                                        <div class="text-sm text-gray-500">أكاديمية العلوم</div>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">قسم أكاديمي</td>
+                                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">8</td>
+                                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">نشط</span>
+                                                            </td>
+                                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                                                <a href="#" class="text-blue-600 hover:text-blue-900 ml-2">تعديل</a>
+                                                                <a href="#" class="text-red-600 hover:text-red-900">حذف</a>
+                                                            </td>
+                                                        </tr>
+                                                        
+                                                        <tr>
+                                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                                <div class="flex items-center">
+                                                                    <div class="flex-shrink-0 h-10 w-10">
+                                                                        <img class="h-10 w-10 rounded-full" src="https://via.placeholder.com/150" alt="">
+                                                                    </div>
+                                                                    <div class="mr-4">
+                                                                        <div class="text-sm font-medium text-gray-900">مجموعة البحث العلمي</div>
+                                                                        <div class="text-sm text-gray-500">أكاديمية العلوم</div>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">مجموعة بحث</td>
+                                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">5</td>
+                                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">معلق</span>
+                                                            </td>
+                                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                                                <a href="#" class="text-blue-600 hover:text-blue-900 ml-2">تعديل</a>
+                                                                <a href="#" class="text-red-600 hover:text-red-900">حذف</a>
+                                                            </td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Lessons and Assignments -->
+                                    <div class="bg-white shadow rounded-lg p-6">
+                                        <div class="flex items-center justify-between mb-4">
+                                            <h2 class="text-lg font-medium text-gray-900">الدروس والواجبات</h2>
+                                            <div class="flex space-x-2">
+                                                <button class="px-3 py-1 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                                                    درس جديد
+                                                </button>
+                                                <button class="px-3 py-1 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                                                    واجب جديد
+                                                </button>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="space-y-4">
+                                            <div class="border-b border-gray-200">
+                                                <nav class="-mb-px flex space-x-8">
+                                                    <a href="#" class="border-blue-500 text-blue-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">الدروس</a>
+                                                    <a href="#" class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">الواجبات</a>
+                                                    <a href="#" class="border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">التسليمات</a>
+                                                </nav>
+                                            </div>
+                                            
+                                            <div class="space-y-4">
+                                                <div class="bg-gray-50 p-4 rounded-lg">
+                                                    <div class="flex justify-between items-start">
+                                                        <div>
+                                                            <h3 class="text-lg font-medium text-gray-900">الدرس الأول: مقدمة في الجبر</h3>
+                                                            <p class="text-sm text-gray-500 mt-1">نشر في: 15 مايو 2023 - فريق الرياضيات</p>
+                                                        </div>
+                                                        <div class="flex space-x-2">
+                                                            <button class="p-1 text-blue-600 hover:text-blue-800">
+                                                                <i class="fas fa-edit"></i>
+                                                            </button>
+                                                            <button class="p-1 text-red-600 hover:text-red-800">
+                                                                <i class="fas fa-trash"></i>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div class="mt-3">
+                                                        <p class="text-sm text-gray-700">مقدمة في أساسيات الجبر والعمليات الجبرية الأساسية.</p>
+                                                    </div>
+                                                    <div class="mt-3 flex items-center text-sm text-gray-500">
+                                                        <i class="fas fa-paperclip mr-1"></i>
+                                                        <span>ملف_الدرس.pdf</span>
+                                                        <span class="mx-2">•</span>
+                                                        <i class="fas fa-comment mr-1"></i>
+                                                        <span>5 تعليقات</span>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div class="bg-gray-50 p-4 rounded-lg">
+                                                    <div class="flex justify-between items-start">
+                                                        <div>
+                                                            <h3 class="text-lg font-medium text-gray-900">الواجب الأول: تمارين الجبر</h3>
+                                                            <p class="text-sm text-gray-500 mt-1">نشر في: 17 مايو 2023 - فريق الرياضيات</p>
+                                                            <p class="text-sm text-gray-500 mt-1">موعد التسليم: 24 مايو 2023</p>
+                                                        </div>
+                                                        <div class="flex space-x-2">
+                                                            <button class="p-1 text-blue-600 hover:text-blue-800">
+                                                                <i class="fas fa-edit"></i>
+                                                            </button>
+                                                            <button class="p-1 text-red-600 hover:text-red-800">
+                                                                <i class="fas fa-trash"></i>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    <div class="mt-3">
+                                                        <p class="text-sm text-gray-700">حل التمارين من الصفحة 45 إلى 50 في كتاب الجبر.</p>
+                                                    </div>
+                                                    <div class="mt-3 flex items-center text-sm text-gray-500">
+                                                        <i class="fas fa-paperclip mr-1"></i>
+                                                        <span>ملف_الواجب.pdf</span>
+                                                        <span class="mx-2">•</span>
+                                                        <i class="fas fa-users mr-1"></i>
+                                                        <span>12/24 سلموا</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Right Column -->
+                                <div class="space-y-6">
+                                    <!-- Notifications -->
+                                    <div class="bg-white shadow rounded-lg p-6">
+                                        <div class="flex items-center justify-between mb-4">
+                                            <h2 class="text-lg font-medium text-gray-900">التذكيرات والإشعارات</h2>
+                                            <button class="text-blue-600 hover:text-blue-800">
+                                                <i class="fas fa-cog"></i>
+                                            </button>
+                                        </div>
+                                        
+                                        <div class="space-y-4">
+                                            <div class="flex items-start">
+                                                <div class="flex-shrink-0 pt-0.5">
+                                                    <img class="h-10 w-10 rounded-full" src="https://via.placeholder.com/150" alt="">
+                                                </div>
+                                                <div class="mr-3">
+                                                    <p class="text-sm font-medium text-gray-900">أحمد محمد</p>
+                                                    <p class="text-sm text-gray-500">سلم الواجب الأول: تمارين الجبر</p>
+                                                    <p class="text-xs text-gray-400 mt-1">منذ ساعتين</p>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="flex items-start">
+                                                <div class="flex-shrink-0 pt-0.5">
+                                                    <img class="h-10 w-10 rounded-full" src="https://via.placeholder.com/150" alt="">
+                                                </div>
+                                                <div class="mr-3">
+                                                    <p class="text-sm font-medium text-gray-900">فريق اللغة العربية</p>
+                                                    <p class="text-sm text-gray-500">تم نشر درس جديد: قواعد النحو الأساسية</p>
+                                                    <p class="text-xs text-gray-400 mt-1">منذ 5 ساعات</p>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="flex items-start">
+                                                <div class="flex-shrink-0 pt-0.5">
+                                                    <div class="flex items-center justify-center h-10 w-10 rounded-full bg-blue-100">
+                                                        <i class="fas fa-calendar-alt text-blue-600"></i>
+                                                    </div>
+                                                </div>
+                                                <div class="mr-3">
+                                                    <p class="text-sm font-medium text-gray-900">تذكير</p>
+                                                    <p class="text-sm text-gray-500">اجتماع مع فريق الرياضيات غدًا الساعة 10 صباحًا</p>
+                                                    <p class="text-xs text-gray-400 mt-1">منذ يوم</p>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="text-center">
+                                                <button class="text-sm text-blue-600 hover:text-blue-800">عرض الكل</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Live Sessions -->
+                                    <div class="bg-white shadow rounded-lg p-6">
+                                        <div class="flex items-center justify-between mb-4">
+                                            <h2 class="text-lg font-medium text-gray-900">جلسات البث المباشر</h2>
+                                            <button id="startLiveSession" class="px-3 py-1 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
+                                                بدء بث جديد
+                                            </button>
+                                        </div>
+                                        
+                                        <div class="space-y-4">
+                                            <div class="bg-gray-50 p-4 rounded-lg">
+                                                <div class="flex justify-between items-start">
+                                                    <div>
+                                                        <h3 class="text-md font-medium text-gray-900">حصة الرياضيات</h3>
+                                                        <p class="text-sm text-gray-500 mt-1">اليوم الساعة 2:00 مساءً</p>
+                                                    </div>
+                                                    <button class="text-blue-600 hover:text-blue-800">
+                                                        <i class="fas fa-external-link-alt"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="bg-gray-50 p-4 rounded-lg">
+                                                <div class="flex justify-between items-start">
+                                                    <div>
+                                                        <h3 class="text-md font-medium text-gray-900">حصة اللغة العربية</h3>
+                                                        <p class="text-sm text-gray-500 mt-1">غدًا الساعة 10:00 صباحًا</p>
+                                                    </div>
+                                                    <button class="text-gray-400 cursor-not-allowed">
+                                                        <i class="fas fa-external-link-alt"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            
+                                            <div id="videoContainer" class="hidden">
+                                                <!-- Jitsi Meet iframe will be inserted here -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Quick Chat -->
+                                    <div class="bg-white shadow rounded-lg p-6">
+                                        <div class="flex items-center justify-between mb-4">
+                                            <h2 class="text-lg font-medium text-gray-900">محادثة سريعة</h2>
+                                            <button class="text-blue-600 hover:text-blue-800">
+                                                <i class="fas fa-ellipsis-v"></i>
+                                            </button>
+                                        </div>
+                                        
+                                        <div class="space-y-4">
+                                            <div class="border rounded-lg p-3 h-64 overflow-y-auto">
+                                                <!-- Chat messages -->
+                                                <div class="chat-bubble received">
+                                                    <p>مرحبًا، كيف يمكنني مساعدتك؟</p>
+                                                    <p class="text-xs text-gray-500 mt-1">أحمد محمد - 2:30 م</p>
+                                                </div>
+                                                
+                                                <div class="chat-bubble sent">
+                                                    <p>لدي سؤال بخصوص الواجب المطلوب</p>
+                                                    <p class="text-xs text-gray-300 mt-1">أنت - 2:31 م</p>
+                                                </div>
+                                                
+                                                <div class="chat-bubble received">
+                                                    <p>بالطبع، ما هو السؤال؟</p>
+                                                    <p class="text-xs text-gray-500 mt-1">أحمد محمد - 2:32 م</p>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="flex">
+                                                <input type="text" class="flex-1 px-3 py-2 border border-gray-300 rounded-l-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="اكتب رسالتك...">
+                                                <button class="px-4 py-2 border border-transparent rounded-r-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                                                    <i class="fas fa-paper-plane"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Authentication state observer
+        auth.onAuthStateChanged((user) => {
+            if (user) {
+                // User is signed in
+                console.log('User is signed in:', user);
+                document.getElementById('sidebar').classList.remove('hidden');
+                
+                // Update user info in sidebar
+                document.getElementById('sidebarUserName').textContent = user.displayName || 'مستخدم';
+                document.getElementById('sidebarUserRole').textContent = 'معلم'; // This should come from user data
+                
+                // Request notification permission
+                requestNotificationPermission();
+            } else {
+                // User is signed out
+                console.log('User is signed out');
+                document.getElementById('authModal').classList.remove('hidden');
+            }
+        });
+        
+        // Auth modal toggle
+        document.getElementById('closeAuthModal').addEventListener('click', () => {
+            document.getElementById('authModal').classList.add('hidden');
+        });
+        
+        // Tab switching in auth modal
+        document.getElementById('loginTab').addEventListener('click', () => {
+            document.getElementById('loginForm').classList.remove('hidden');
+            document.getElementById('registerForm').classList.add('hidden');
+            document.getElementById('forgotPasswordForm').classList.add('hidden');
+            document.getElementById('loginTab').classList.add('border-blue-500', 'text-blue-600');
+            document.getElementById('loginTab').classList.remove('border-transparent', 'text-gray-500');
+            document.getElementById('registerTab').classList.add('border-transparent', 'text-gray-500');
+            document.getElementById('registerTab').classList.remove('border-blue-500', 'text-blue-600');
+        });
+        
+        document.getElementById('registerTab').addEventListener('click', () => {
+            document.getElementById('registerForm').classList.remove('hidden');
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('forgotPasswordForm').classList.add('hidden');
+            document.getElementById('registerTab').classList.add('border-blue-500', 'text-blue-600');
+            document.getElementById('registerTab').classList.remove('border-transparent', 'text-gray-500');
+            document.getElementById('loginTab').classList.add('border-transparent', 'text-gray-500');
+            document.getElementById('loginTab').classList.remove('border-blue-500', 'text-blue-600');
+        });
+        
+        document.getElementById('forgotPasswordBtn').addEventListener('click', () => {
+            document.getElementById('forgotPasswordForm').classList.remove('hidden');
+            document.getElementById('loginForm').classList.add('hidden');
+            document.getElementById('registerForm').classList.add('hidden');
+        });
+        
+        document.getElementById('backToLoginBtn').addEventListener('click', () => {
+            document.getElementById('loginForm').classList.remove('hidden');
+            document.getElementById('forgotPasswordForm').classList.add('hidden');
+            document.getElementById('registerForm').classList.add('hidden');
+        });
+        
+        // Login functionality
+        document.getElementById('loginBtn').addEventListener('click', () => {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            
+            auth.signInWithEmailAndPassword(email, password)
+                .then((userCredential) => {
+                    // Signed in
+                    document.getElementById('authModal').classList.add('hidden');
+                })
+                .catch((error) => {
+                    alert(error.message);
+                });
+        });
+        
+        // Register functionality
+        document.getElementById('registerBtn').addEventListener('click', () => {
+            const name = document.getElementById('registerName').value;
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+            const confirmPassword = document.getElementById('registerConfirmPassword').value;
+            const role = document.getElementById('registerRole').value;
+            
+            if (password !== confirmPassword) {
+                alert('كلمة المرور غير متطابقة');
+                return;
+            }
+            
+            auth.createUserWithEmailAndPassword(email, password)
+                .then((userCredential) => {
+                    // Signed up
+                    const user = userCredential.user;
+                    
+                    // Update user profile
+                    return user.updateProfile({
+                        displayName: name
+                    }).then(() => {
+                        // Save additional user data to Firestore
+                        return db.collection('users').doc(user.uid).set({
+                            name: name,
+                            email: email,
+                            role: role,
+                            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                    });
+                })
+                .then(() => {
+                    document.getElementById('authModal').classList.add('hidden');
+                })
+                .catch((error) => {
+                    alert(error.message);
+                });
+        });
+        
+        // Forgot password functionality
+        document.getElementById('resetPasswordBtn').addEventListener('click', () => {
+            const email = document.getElementById('forgotEmail').value;
+            
+            auth.sendPasswordResetEmail(email)
+                .then(() => {
+                    alert('تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني');
+                    document.getElementById('forgotPasswordForm').classList.add('hidden');
+                    document.getElementById('loginForm').classList.remove('hidden');
+                })
+                .catch((error) => {
+                    alert(error.message);
+                });
+        });
+        
+        // Logout functionality
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            auth.signOut().then(() => {
+                // Sign-out successful
+                document.getElementById('authModal').classList.remove('hidden');
+            }).catch((error) => {
+                alert(error.message);
+            });
+        });
+        
+        document.getElementById('mobileLogoutBtn').addEventListener('click', () => {
+            auth.signOut().then(() => {
+                // Sign-out successful
+                document.getElementById('authModal').classList.remove('hidden');
+                document.getElementById('mobileSidebar').classList.add('hidden');
+            }).catch((error) => {
+                alert(error.message);
+            });
+        });
+        
+        document.getElementById('dropdownLogoutBtn').addEventListener('click', () => {
+            auth.signOut().then(() => {
+                // Sign-out successful
+                document.getElementById('authModal').classList.remove('hidden');
+                document.getElementById('userMenuDropdown').classList.add('hidden');
+            }).catch((error) => {
+                alert(error.message);
+            });
+        });
+        
+        // Mobile sidebar toggle
+        document.getElementById('mobileSidebarButton').addEventListener('click', () => {
+            document.getElementById('mobileSidebar').classList.remove('hidden');
+        });
+        
+        document.getElementById('closeMobileSidebar').addEventListener('click', () => {
+            document.getElementById('mobileSidebar').classList.add('hidden');
+        });
+        
+        document.getElementById('mobileSidebarBackdrop').addEventListener('click', () => {
+            document.getElementById('mobileSidebar').classList.add('hidden');
+        });
+        
+        // User dropdown toggle
+        document.getElementById('userMenuButton').addEventListener('click', () => {
+            const dropdown = document.getElementById('userMenuDropdown');
+            if (dropdown.classList.contains('hidden')) {
+                dropdown.classList.remove('hidden');
+            } else {
+                dropdown.classList.add('hidden');
+            }
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (event) => {
+            const dropdown = document.getElementById('userMenuDropdown');
+            const button = document.getElementById('userMenuButton');
+            
+            if (!dropdown.contains(event.target) && !button.contains(event.target)) {
+                dropdown.classList.add('hidden');
+            }
+        });
+        
+        // Sidebar item active state
+        const sidebarItems = document.querySelectorAll('.sidebar-item');
+        sidebarItems.forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                sidebarItems.forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                
+                // Close mobile sidebar after selection
+                document.getElementById('mobileSidebar').classList.add('hidden');
+            });
+        });
+        
+        // Start live session with Jitsi
+        document.getElementById('startLiveSession').addEventListener('click', () => {
+            const domain = 'meet.jit.si';
+            const options = {
+                roomName: 'EduSystem-' + Math.random().toString(36).substring(7),
+                width: '100%',
+                height: '100%',
+                parentNode: document.querySelector('#videoContainer'),
+                userInfo: {
+                    displayName: auth.currentUser?.displayName || 'مستخدم'
+                }
+            };
+            
+            document.getElementById('videoContainer').classList.remove('hidden');
+            const api = new JitsiMeetExternalAPI(domain, options);
+            
+            // You can add event listeners here for the Jitsi Meet API
+            api.addEventListener('participantJoined', (data) => {
+                console.log('Participant joined:', data);
+            });
+        });
+        
+        // Create educational entity
+        document.querySelector('.bg-white.shadow.rounded-lg.p-6 button[class*="bg-blue-600"]').addEventListener('click', () => {
+            const entityName = document.getElementById('entityName').value;
+            const entityType = document.getElementById('entityType').value;
+            const entityDescription = document.getElementById('entityDescription').value;
+            
+            const permissions = {
+                teams: document.getElementById('permission-teams').checked,
+                courses: document.getElementById('permission-courses').checked,
+                live: document.getElementById('permission-live').checked
+            };
+            
+            if (!entityName) {
+                alert('الرجاء إدخال اسم الكيان');
+                return;
+            }
+            
+            // Save to Firestore
+            db.collection('educationalEntities').add({
+                name: entityName,
+                type: entityType,
+                description: entityDescription,
+                permissions: permissions,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                createdBy: auth.currentUser.uid
+            })
+            .then(() => {
+                alert('تم إنشاء الكيان التعليمي بنجاح');
+                // Clear form
+                document.getElementById('entityName').value = '';
+                document.getElementById('entityDescription').value = '';
+                document.getElementById('permission-teams').checked = false;
+                document.getElementById('permission-courses').checked = false;
+                document.getElementById('permission-live').checked = false;
+            })
+            .catch((error) => {
+                alert('حدث خطأ أثناء حفظ البيانات: ' + error.message);
+            });
+        });
+    </script>
+<p style="border-radius: 8px; text-align: center; font-size: 12px; color: #fff; margin-top: 16px;position: fixed; left: 8px; bottom: 8px; z-index: 10; background: rgba(0, 0, 0, 0.8); padding: 4px 8px;">Made with <img src="https://enzostvs-deepsite.hf.space/logo.svg" alt="DeepSite Logo" style="width: 16px; height: 16px; vertical-align: middle;display:inline-block;margin-right:3px;filter:brightness(0) invert(1);"><a href="https://enzostvs-deepsite.hf.space" style="color: #fff;text-decoration: underline;" target="_blank" >DeepSite</a> - 🧬 <a href="https://enzostvs-deepsite.hf.space?remix=Adel25/one" style="color: #fff;text-decoration: underline;" target="_blank" >Remix</a></p></body>
+</html>
